@@ -8,7 +8,7 @@ use building_blocks::{
 use std::mem::MaybeUninit;
 
 pub struct Grid {
-    cells: Array2x2<Entity, Option<PieceType>>,
+    cells: CellArray,
     projection: Box<dyn Projection>,
     active: bool,
 }
@@ -21,6 +21,10 @@ pub type CellArray = Array2x2<Entity, Option<PieceType>>;
 pub struct GridCell;
 
 impl Grid {
+    pub fn width(&self) -> i32 {
+        self.cells.extent().shape.x()
+    }
+
     pub fn height(&self) -> i32 {
         self.cells.extent().shape.y()
     }
@@ -41,7 +45,7 @@ impl Grid {
     }
 
     fn row_extent(&self, row: i32) -> Extent2i {
-        Extent2i::from_min_and_shape(PointN([0, row]), PointN([self.cells.extent().shape.x(), 1]))
+        Extent2i::from_min_and_shape(PointN([0, row]), PointN([self.width(), 1]))
     }
 
     fn shift_rows_down(&mut self, start_row: i32, end_row: i32) {
@@ -86,26 +90,20 @@ impl Grid {
 
     fn any_cells_colliding(&self, check_cells: &[Point2i]) -> bool {
         let piece_types = self.cells.borrow_channels(|(_e, p)| p);
-        for check_cell in check_cells.iter() {
-            if piece_types.get(*check_cell).is_some() {
-                return true;
-            }
-        }
 
-        false
+        check_cells
+            .iter()
+            .cloned()
+            .any(|p| piece_types.get(p).is_some())
     }
 
     fn any_cells_out_of_bounds(&self, check_cells: &[Point2i]) -> bool {
-        for check_cell in check_cells.iter().cloned() {
-            if !self.cells.extent().contains(check_cell) {
-                return true;
-            }
-        }
-
-        false
+        check_cells
+            .iter()
+            .cloned()
+            .any(|p| !self.cells.extent().contains(p))
     }
 
-    /// Returns `true` iff the piece was able to move in this grid.
     pub fn handle_piece_movement(&mut self, piece: &FallingPiece) -> PieceMovementResult {
         assert!(self.active);
 
@@ -132,9 +130,9 @@ impl Grid {
 
     fn write_piece_with_value(&mut self, piece: &FallingPiece, value: Option<PieceType>) {
         let projected_cells = self.project_piece(piece);
-        let mut cell_values = self.cells.borrow_channels_mut(|(_, v)| v);
+        let mut piece_types = self.cells.borrow_channels_mut(|(_, v)| v);
         for cell_p in projected_cells.iter().cloned() {
-            *cell_values.get_mut(cell_p) = value;
+            *piece_types.get_mut(cell_p) = value;
         }
     }
 
@@ -186,7 +184,7 @@ pub fn create_grids(config: &Config, scene_assets: &SceneAssets, commands: &mut 
 
     let left_grid_projection = Box::new(|p: Point3i| p.xy());
     let left_grid_transform = Transform {
-        translation: config.grid_offset * -RIGHT_AXIS,
+        translation: config.grid_offset * -Vec3::Z,
         rotation: Quat::from_axis_angle(Vec3::Y, config.grid_tilt_angle),
         scale: Vec3::ONE,
     };
@@ -201,7 +199,7 @@ pub fn create_grids(config: &Config, scene_assets: &SceneAssets, commands: &mut 
 
     let right_grid_projection = Box::new(|p: Point3i| p.zy());
     let right_grid_transform = Transform {
-        translation: config.grid_offset * -LEFT_AXIS,
+        translation: config.grid_offset * -Vec3::X,
         rotation: Quat::from_axis_angle(
             Vec3::Y,
             -(std::f32::consts::FRAC_PI_2 + config.grid_tilt_angle),
@@ -286,9 +284,6 @@ fn all_cell_entities(cells: &CellArray) -> Vec<Entity> {
 
     entities
 }
-
-const LEFT_AXIS: Vec3 = Vec3::X;
-const RIGHT_AXIS: Vec3 = Vec3::Z;
 
 pub fn synchronize_grid_materials(
     grids_query: Query<&Grid>,
