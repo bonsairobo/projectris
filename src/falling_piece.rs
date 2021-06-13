@@ -210,7 +210,7 @@ fn try_drop_piece(
     tfm: &mut Transform,
     grid_query: &mut Query<&mut Grid>,
 ) {
-    let mut new_piece = piece.clone();
+    let mut new_piece = *piece;
     new_piece.translate_n_rows(-1);
 
     if check_movement(piece, &new_piece, true, grid_query) {
@@ -225,7 +225,7 @@ fn fast_drop_piece(
     grid_query: &mut Query<&mut Grid>,
 ) {
     loop {
-        let mut new_piece = piece.clone();
+        let mut new_piece = *piece;
         new_piece.translate_n_rows(-1);
 
         if check_movement(piece, &new_piece, true, grid_query) {
@@ -246,7 +246,7 @@ fn try_rotate_piece(
     tfm: &mut Transform,
     grid_query: &mut Query<&mut Grid>,
 ) {
-    let mut new_piece = piece.clone();
+    let mut new_piece = *piece;
     new_piece.rotate(rotation.matrix);
 
     if check_movement(piece, &new_piece, false, grid_query) {
@@ -261,7 +261,7 @@ fn try_translate_piece(
     tfm: &mut Transform,
     grid_query: &mut Query<&mut Grid>,
 ) {
-    let mut new_piece = piece.clone();
+    let mut new_piece = *piece;
     new_piece.translate(translation);
 
     if check_movement(piece, &new_piece, false, grid_query) {
