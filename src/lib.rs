@@ -1,3 +1,4 @@
+mod assets;
 mod config;
 mod controls;
 mod drop_timer;
@@ -7,8 +8,8 @@ mod grab_bag;
 mod grid;
 mod piece;
 mod rotation;
-mod scene;
 
+pub use assets::*;
 pub use config::*;
 pub use controls::*;
 pub use drop_timer::*;
@@ -18,4 +19,3 @@ pub use grab_bag::*;
 pub use grid::*;
 pub use piece::*;
 pub use rotation::*;
-pub use scene::*;

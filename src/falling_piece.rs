@@ -112,7 +112,7 @@ fn cube_pbr(
     mesh: Handle<Mesh>,
 ) -> PbrBundle {
     PbrBundle {
-        material: materials.get(piece_type),
+        material: materials.get_piece_material(piece_type),
         mesh,
         transform: Transform::from_translation(offset),
         ..Default::default()

@@ -165,9 +165,9 @@ impl Grid {
             .for_each(self.cells.extent(), |_: (), (cell_entity, cell_type)| {
                 let (_, mut material) = cell_material_query.get_mut(cell_entity).unwrap();
                 if let Some(piece_type) = cell_type {
-                    *material = materials.get(piece_type);
+                    *material = materials.get_cell_material(piece_type);
                 } else {
-                    *material = materials.empty_material();
+                    *material = materials.empty_cell_material();
                 }
             });
     }
@@ -258,7 +258,7 @@ fn spawn_cells(
                 .insert(GridCell)
                 .insert_bundle(PbrBundle {
                     mesh: cell_mesh.clone(),
-                    material: materials.empty_material(),
+                    material: materials.empty_cell_material(),
                     // We have to offset by 0.5 because the cell meshes are centered at (0, 0).
                     transform: Transform::from_xyz(p.x() as f32 + 0.5, p.y() as f32 + 0.5, 0.0),
                     ..Default::default()
