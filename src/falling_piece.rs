@@ -141,7 +141,7 @@ pub fn update_falling_piece(
         if let FallingPieceEvent::Spawn = event {
             spawn_falling_piece(
                 config.grid_size,
-                &mut *grab_bag,
+                &mut grab_bag,
                 &scene_assets.piece_materials,
                 scene_assets.cube_mesh.clone(),
                 &mut grid_query,
@@ -176,7 +176,7 @@ pub fn update_falling_piece(
                 commands.entity(piece_entity).despawn_recursive();
                 spawn_falling_piece(
                     config.grid_size,
-                    &mut *grab_bag,
+                    &mut grab_bag,
                     &scene_assets.piece_materials,
                     scene_assets.cube_mesh.clone(),
                     &mut grid_query,

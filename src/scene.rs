@@ -24,7 +24,7 @@ pub fn create_scene_assets(
     }));
     let cube_mesh = meshes.add(Mesh::from(shape::Cube { size: 1.0 }));
 
-    let piece_materials = PieceMaterials::new(&mut *materials);
+    let piece_materials = PieceMaterials::new(&mut materials);
 
     commands.insert_resource(SceneAssets {
         left_cell_mesh,
