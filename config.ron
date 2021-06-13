@@ -5,4 +5,8 @@
     camera_position: (-21.0, 10.0, -21.0),
     camera_target: (5.0, 10.0, 5.0),
     repeats_per_bag: 3,
+    left_rotate_modifier: Z,
+    left_translate_modifier: X,
+    right_translate_modifier: C,
+    right_rotate_modifier: V,
 )

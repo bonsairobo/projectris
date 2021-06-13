@@ -1,4 +1,4 @@
-use bevy::math::Vec3;
+use bevy::{math::Vec3, prelude::KeyCode};
 use building_blocks::core::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -10,6 +10,10 @@ pub struct Config {
     pub camera_position: Vec3,
     pub camera_target: Vec3,
     pub repeats_per_bag: usize,
+    pub left_rotate_modifier: KeyCode,
+    pub left_translate_modifier: KeyCode,
+    pub right_translate_modifier: KeyCode,
+    pub right_rotate_modifier: KeyCode,
 }
 
 impl Config {
