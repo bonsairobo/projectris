@@ -1,0 +1,14 @@
+[package]
+name = "projectris"
+version = "0.1.0"
+authors = ["Duncan <bonsairobo@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+bevy = "0.5"
+rand = "0.8"
+ron = "0.6"
+serde = "1.0"
+
+building-blocks = { git = "https://github.com/bonsairobo/building-blocks", branch = "main", features = ["glam"], default-features = false }
+smooth-bevy-cameras = { git = "https://github.com/bonsairobo/smooth-bevy-cameras", rev = "47184f9" }
