@@ -2,6 +2,8 @@ use crate::FallingPieceEvent;
 
 use bevy::prelude::*;
 
+// TODO: get faster as the player's score gets higher
+
 pub struct DropTimer {
     last_drop_time: f64,
     time_between_drops: f64,

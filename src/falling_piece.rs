@@ -1,5 +1,6 @@
 use crate::{
-    Config, GrabBag, Grid, PieceMaterials, PieceMovementResult, PieceType, Rotation, SceneAssets,
+    CellValue, Config, GrabBag, Grid, PieceCollisionResult, PieceMaterials, PieceType, Rotation,
+    SceneAssets,
 };
 
 use bevy::prelude::*;
@@ -50,13 +51,9 @@ pub fn spawn_falling_piece(
     grab_bag: &mut GrabBag,
     materials: &PieceMaterials,
     cube_mesh: Handle<Mesh>,
-    grids_query: &mut Query<&mut Grid>,
+    grid_query: &mut Query<&mut Grid>,
     commands: &mut Commands,
 ) -> Entity {
-    for mut grid in grids_query.iter_mut() {
-        grid.eliminate_full_rows();
-    }
-
     let center_position = PointN([grid_size.x() / 2, grid_size.y() - 1, grid_size.x() / 2]);
     let piece_type = grab_bag.choose_next_piece_type();
     let child_cubes = piece_type.cube_configuration();
@@ -92,10 +89,12 @@ pub fn spawn_falling_piece(
         ],
     };
 
-    for mut grid in grids_query.iter_mut() {
+    for mut grid in grid_query.iter_mut() {
         grid.activate();
         grid.write_piece(&piece);
     }
+
+    write_drop_hint_in_active_grids(&piece, grid_query);
 
     commands
         .spawn()
@@ -138,6 +137,11 @@ pub fn update_falling_piece(
     config: Res<Config>,
 ) {
     for event in events.iter() {
+        // Reset the visible copy of the grid.
+        for mut grid in grid_query.iter_mut() {
+            grid.copy_master_to_visible();
+        }
+
         if let FallingPieceEvent::Spawn = event {
             spawn_falling_piece(
                 config.grid_size,
@@ -151,8 +155,6 @@ pub fn update_falling_piece(
         }
 
         for (piece_entity, mut piece, mut tfm) in falling_piece_query.iter_mut() {
-            erase_piece_from_active_grids(&piece, &mut grid_query);
-
             match event.clone() {
                 FallingPieceEvent::Drop => try_drop_piece(&mut piece, &mut tfm, &mut grid_query),
                 FallingPieceEvent::FastDrop => {
@@ -172,7 +174,9 @@ pub fn update_falling_piece(
             write_piece_to_active_grids(&piece, &mut grid_query);
 
             let any_active_grids = grid_query.iter_mut().any(|g| g.is_active());
-            if !any_active_grids {
+            if any_active_grids {
+                write_drop_hint_in_active_grids(&piece, &mut grid_query);
+            } else {
                 commands.entity(piece_entity).despawn_recursive();
                 spawn_falling_piece(
                     config.grid_size,
@@ -189,19 +193,18 @@ pub fn update_falling_piece(
 
 fn write_piece_to_active_grids(piece: &FallingPiece, grid_query: &mut Query<&mut Grid>) {
     for mut grid in grid_query.iter_mut() {
-        if !grid.is_active() {
-            continue;
+        if grid.is_active() {
+            grid.write_piece(piece);
         }
-        grid.write_piece(piece);
     }
 }
 
-fn erase_piece_from_active_grids(piece: &FallingPiece, grid_query: &mut Query<&mut Grid>) {
+fn write_drop_hint_in_active_grids(piece: &FallingPiece, grid_query: &mut Query<&mut Grid>) {
     for mut grid in grid_query.iter_mut() {
-        if !grid.is_active() {
-            continue;
+        if grid.is_active() {
+            let dropped_piece = speculate_fast_drop_piece(piece, &grid);
+            grid.write_piece_with_value(&dropped_piece, CellValue::DropHint);
         }
-        grid.erase_piece(piece);
     }
 }
 
@@ -213,7 +216,7 @@ fn try_drop_piece(
     let mut new_piece = *piece;
     new_piece.translate_n_rows(-1);
 
-    if check_movement(piece, &new_piece, true, grid_query) {
+    if move_accepted_in_all_active_grids(piece, &new_piece, true, grid_query) {
         tfm.translation -= Vec3::Y;
         *piece = new_piece;
     }
@@ -224,17 +227,47 @@ fn fast_drop_piece(
     tfm: &mut Transform,
     grid_query: &mut Query<&mut Grid>,
 ) {
+    let rows_dropped = fast_drop_piece_in_all_active_grids(piece, true, grid_query);
+    tfm.translation -= rows_dropped as f32 * Vec3::Y;
+}
+
+fn speculate_fast_drop_piece(piece: &FallingPiece, grid: &Grid) -> FallingPiece {
+    let mut moved_piece = *piece;
+    fast_drop_piece_in_grid(&mut moved_piece, grid);
+
+    moved_piece
+}
+
+fn fast_drop_piece_in_all_active_grids(
+    piece: &mut FallingPiece,
+    commit_when_stuck: bool,
+    grid_query: &mut Query<&mut Grid>,
+) -> i32 {
+    let mut rows_dropped = 0;
+
     loop {
         let mut new_piece = *piece;
         new_piece.translate_n_rows(-1);
 
-        if check_movement(piece, &new_piece, true, grid_query) {
-            tfm.translation -= Vec3::Y;
+        if move_accepted_in_all_active_grids(piece, &new_piece, commit_when_stuck, grid_query) {
+            rows_dropped += 1;
             *piece = new_piece;
         }
 
         let any_grids_active = grid_query.iter_mut().any(|g| g.is_active());
         if !any_grids_active {
+            break;
+        }
+    }
+
+    rows_dropped
+}
+
+fn fast_drop_piece_in_grid(piece: &mut FallingPiece, grid: &Grid) {
+    loop {
+        piece.translate_n_rows(-1);
+        if !move_accepted_in_grid(piece, grid) {
+            piece.translate_n_rows(1);
             return;
         }
     }
@@ -249,7 +282,7 @@ fn try_rotate_piece(
     let mut new_piece = *piece;
     new_piece.rotate(rotation.matrix);
 
-    if check_movement(piece, &new_piece, false, grid_query) {
+    if move_accepted_in_all_active_grids(piece, &new_piece, false, grid_query) {
         tfm.rotate(rotation.quat);
         *piece = new_piece;
     }
@@ -264,16 +297,16 @@ fn try_translate_piece(
     let mut new_piece = *piece;
     new_piece.translate(translation);
 
-    if check_movement(piece, &new_piece, false, grid_query) {
+    if move_accepted_in_all_active_grids(piece, &new_piece, false, grid_query) {
         tfm.translation += Vec3::from(Point3f::from(translation));
         *piece = new_piece;
     }
 }
 
-fn check_movement(
+fn move_accepted_in_all_active_grids(
     old_piece: &FallingPiece,
     new_piece: &FallingPiece,
-    moved_by_gravity: bool,
+    commit_when_stuck: bool,
     grid_query: &mut Query<&mut Grid>,
 ) -> bool {
     let mut move_accepted_in_all_active_grids = true;
@@ -282,18 +315,21 @@ fn check_movement(
             continue;
         }
 
-        match grid.handle_piece_movement(new_piece) {
-            PieceMovementResult::ValidMovement => {}
-            PieceMovementResult::OutOfBounds | PieceMovementResult::HitOtherPiece => {
-                if moved_by_gravity {
-                    grid.deactivate();
-                    grid.write_piece(old_piece);
-                }
-
-                move_accepted_in_all_active_grids = false;
+        if !move_accepted_in_grid(new_piece, &grid) {
+            if commit_when_stuck {
+                grid.write_piece(old_piece);
+                grid.deactivate();
             }
+            move_accepted_in_all_active_grids = false;
         }
     }
 
     move_accepted_in_all_active_grids
+}
+
+fn move_accepted_in_grid(new_piece: &FallingPiece, grid: &Grid) -> bool {
+    match grid.check_piece_collision(new_piece) {
+        PieceCollisionResult::NoCollision => true,
+        PieceCollisionResult::OutOfBounds | PieceCollisionResult::HitOtherPiece => false,
+    }
 }

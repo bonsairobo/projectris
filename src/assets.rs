@@ -1,4 +1,4 @@
-use crate::PieceType;
+use crate::{CellValue, PieceType};
 
 use bevy::prelude::*;
 
@@ -83,8 +83,12 @@ impl PieceMaterials {
         self.piece_materials[piece_type as usize].clone()
     }
 
-    pub fn get_cell_material(&self, piece_type: PieceType) -> Handle<StandardMaterial> {
-        self.cell_materials[piece_type as usize].clone()
+    pub fn get_cell_material(&self, cell_value: CellValue) -> Handle<StandardMaterial> {
+        match cell_value {
+            CellValue::Piece(piece_type) => self.cell_materials[piece_type as usize].clone(),
+            CellValue::DropHint => self.drop_hint_material(),
+            CellValue::Empty => self.empty_cell_material(),
+        }
     }
 
     pub fn empty_cell_material(&self) -> Handle<StandardMaterial> {

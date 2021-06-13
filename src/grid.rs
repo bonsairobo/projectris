@@ -3,7 +3,7 @@ use crate::{Config, FallingPiece, PieceMaterials, PieceType, SceneAssets};
 use bevy::prelude::*;
 use building_blocks::{
     core::prelude::*,
-    storage::{access_traits::*, Array2x2},
+    storage::{access_traits::*, Array2x1, Array2x3},
 };
 use std::mem::MaybeUninit;
 
@@ -16,7 +16,22 @@ pub struct Grid {
 pub trait Projection: Fn(Point3i) -> Point2i + 'static + Send + Sync {}
 impl<T> Projection for T where T: Fn(Point3i) -> Point2i + 'static + Send + Sync {}
 
-pub type CellArray = Array2x2<Entity, Option<PieceType>>;
+// Left value is the "master copy," which is never show to the player; it's only used for background calculations that don't
+// want the falling piece getting in the way. Right value is the "visible copy" that is shown to the player.
+pub type CellArray = Array2x3<Entity, CellValue, CellValue>;
+
+#[derive(Clone, Copy, Debug)]
+pub enum CellValue {
+    Piece(PieceType),
+    DropHint,
+    Empty,
+}
+
+impl CellValue {
+    pub fn is_piece(&self) -> bool {
+        matches!(self, CellValue::Piece(_))
+    }
+}
 
 pub struct GridCell;
 
@@ -29,7 +44,43 @@ impl Grid {
         self.cells.extent().shape.y()
     }
 
-    pub fn eliminate_full_rows(&mut self) {
+    fn row_extent(&self, row: i32) -> Extent2i {
+        Extent2i::from_min_and_shape(PointN([0, row]), PointN([self.width(), 1]))
+    }
+
+    fn edit_visible_channel(&mut self) -> Array2x1<CellValue, &mut [CellValue]> {
+        self.cells.borrow_channels_mut(|(_, _, v)| v)
+    }
+
+    fn edit_master_channel(&mut self) -> Array2x1<CellValue, &mut [CellValue]> {
+        self.cells.borrow_channels_mut(|(_, v, _)| v)
+    }
+
+    fn read_master_channel(&self) -> Array2x1<CellValue, &[CellValue]> {
+        self.cells.borrow_channels(|(_, v, _)| v)
+    }
+
+    pub fn copy_master_to_visible(&mut self) {
+        let extent = *self.cells.extent();
+        self.cells.for_each_mut(&extent, |_: (), (_, m, v)| {
+            *v = *m;
+        });
+    }
+
+    fn copy_visible_to_master(&mut self) {
+        let extent = *self.cells.extent();
+        self.cells.for_each_mut(&extent, |_: (), (_, m, v)| {
+            *m = *v;
+        });
+    }
+
+    fn commit(&mut self) {
+        self.copy_visible_to_master();
+        self.eliminate_full_rows();
+        self.copy_master_to_visible();
+    }
+
+    fn eliminate_full_rows(&mut self) {
         let mut rows_to_check = self.height();
         let mut check_row = 0;
 
@@ -42,10 +93,6 @@ impl Grid {
                 check_row += 1;
             }
         }
-    }
-
-    fn row_extent(&self, row: i32) -> Extent2i {
-        Extent2i::from_min_and_shape(PointN([0, row]), PointN([self.width(), 1]))
     }
 
     fn shift_rows_down(&mut self, start_row: i32, end_row: i32) {
@@ -61,7 +108,7 @@ impl Grid {
 
     fn shift_row_down(&mut self, row: i32) {
         let row = self.row_extent(row);
-        let mut piece_types = self.cells.borrow_channels_mut(|(_e, p)| p);
+        let mut piece_types = self.edit_master_channel();
         for p in row.iter_points() {
             let p_val = piece_types.get(p);
             *piece_types.get_mut(p - PointN([0, 1])) = p_val;
@@ -70,17 +117,16 @@ impl Grid {
 
     fn clear_row(&mut self, row: i32) {
         let row = self.row_extent(row);
-        self.cells
-            .borrow_channels_mut(|(_e, p)| p)
-            .fill_extent(&row, None);
+        self.edit_master_channel()
+            .fill_extent(&row, CellValue::Empty);
     }
 
     fn row_is_full(&self, row: i32) -> bool {
         let row = self.row_extent(row);
-        let piece_types = self.cells.borrow_channels(|(_e, p)| p);
+        let piece_types = self.read_master_channel();
 
         for p in row.iter_points() {
-            if piece_types.get(p).is_none() {
+            if let CellValue::Empty = piece_types.get(p) {
                 return false;
             }
         }
@@ -89,12 +135,12 @@ impl Grid {
     }
 
     fn any_cells_colliding(&self, check_cells: &[Point2i]) -> bool {
-        let piece_types = self.cells.borrow_channels(|(_e, p)| p);
+        let piece_types = self.read_master_channel();
 
         check_cells
             .iter()
             .cloned()
-            .any(|p| piece_types.get(p).is_some())
+            .any(|p| piece_types.get(p).is_piece())
     }
 
     fn any_cells_out_of_bounds(&self, check_cells: &[Point2i]) -> bool {
@@ -104,39 +150,34 @@ impl Grid {
             .any(|p| !self.cells.extent().contains(p))
     }
 
-    pub fn handle_piece_movement(&mut self, piece: &FallingPiece) -> PieceMovementResult {
-        assert!(self.active);
-
+    pub fn check_piece_collision(&self, piece: &FallingPiece) -> PieceCollisionResult {
         let projected_cells = self.project_piece(piece);
 
         if self.any_cells_out_of_bounds(&projected_cells) {
-            return PieceMovementResult::OutOfBounds;
+            return PieceCollisionResult::OutOfBounds;
         }
 
         if self.any_cells_colliding(&projected_cells) {
-            return PieceMovementResult::HitOtherPiece;
+            return PieceCollisionResult::HitOtherPiece;
         }
 
-        PieceMovementResult::ValidMovement
+        PieceCollisionResult::NoCollision
     }
 
     pub fn write_piece(&mut self, piece: &FallingPiece) {
-        self.write_piece_with_value(piece, Some(piece.piece_type()))
+        self.write_piece_with_value(piece, CellValue::Piece(piece.piece_type()))
     }
 
-    pub fn erase_piece(&mut self, piece: &FallingPiece) {
-        self.write_piece_with_value(piece, None)
-    }
-
-    fn write_piece_with_value(&mut self, piece: &FallingPiece, value: Option<PieceType>) {
+    pub fn write_piece_with_value(&mut self, piece: &FallingPiece, value: CellValue) {
         let projected_cells = self.project_piece(piece);
-        let mut piece_types = self.cells.borrow_channels_mut(|(_, v)| v);
+        let mut piece_types = self.edit_visible_channel();
         for cell_p in projected_cells.iter().cloned() {
             *piece_types.get_mut(cell_p) = value;
         }
     }
 
     pub fn deactivate(&mut self) {
+        self.commit();
         self.active = false;
     }
 
@@ -161,26 +202,27 @@ impl Grid {
         materials: &PieceMaterials,
         cell_material_query: &mut Query<(&GridCell, &mut Handle<StandardMaterial>)>,
     ) {
-        self.cells
-            .for_each(self.cells.extent(), |_: (), (cell_entity, cell_type)| {
+        self.cells.for_each(
+            self.cells.extent(),
+            |_: (), (cell_entity, _, visible_value)| {
                 let (_, mut material) = cell_material_query.get_mut(cell_entity).unwrap();
-                if let Some(piece_type) = cell_type {
-                    *material = materials.get_cell_material(piece_type);
-                } else {
-                    *material = materials.empty_cell_material();
-                }
-            });
+                *material = materials.get_cell_material(visible_value);
+            },
+        );
     }
 }
 
-pub enum PieceMovementResult {
+pub enum PieceCollisionResult {
     HitOtherPiece,
     OutOfBounds,
-    ValidMovement,
+    NoCollision,
 }
 
 pub fn create_grids(config: &Config, scene_assets: &SceneAssets, commands: &mut Commands) {
     let grid_size = config.grid_size;
+
+    // All cells are locally in the XY plane, so we rotate the parent entity for each grid to fall into the correct plane,
+    // either XY or ZY.
 
     let left_grid_projection = Box::new(|p: Point3i| p.xy());
     let left_grid_transform = Transform {
@@ -247,12 +289,12 @@ fn spawn_cells(
     cell_mesh: Handle<Mesh>,
 ) -> CellArray {
     let grid_extent = Extent2i::from_min_and_shape(Point2i::ZERO, shape);
-    let mut cells: Array2x2<MaybeUninit<Entity>, MaybeUninit<Option<PieceType>>> =
-        unsafe { Array2x2::maybe_uninit(grid_extent) };
+    let mut cells: Array2x3<MaybeUninit<Entity>, MaybeUninit<CellValue>, MaybeUninit<CellValue>> =
+        unsafe { Array2x3::maybe_uninit(grid_extent) };
 
     cells.for_each_mut(
         &grid_extent,
-        |p: Point2i, (uninit_entity, uninit_piece_type)| {
+        |p: Point2i, (uninit_entity, uninit_master_value, uninit_visible_value)| {
             let entity = commands
                 .spawn()
                 .insert(GridCell)
@@ -266,7 +308,8 @@ fn spawn_cells(
                 .id();
             unsafe {
                 uninit_entity.as_mut_ptr().write(entity);
-                uninit_piece_type.as_mut_ptr().write(None);
+                uninit_master_value.as_mut_ptr().write(CellValue::Empty);
+                uninit_visible_value.as_mut_ptr().write(CellValue::Empty);
             }
         },
     );
@@ -277,7 +320,7 @@ fn spawn_cells(
 fn all_cell_entities(cells: &CellArray) -> Vec<Entity> {
     let mut entities = Vec::new();
     cells
-        .borrow_channels(|(e, _p)| e)
+        .borrow_channels(|(e, _, _)| e)
         .for_each(cells.extent(), |_: (), entity| {
             entities.push(entity);
         });

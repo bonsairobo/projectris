@@ -3,6 +3,8 @@ use crate::{Config, FallingPieceEvent, Rotation};
 use bevy::prelude::*;
 use building_blocks::core::PointN;
 
+// TODO: fast drop for one side at a time
+
 pub fn send_move_piece_events(
     config: Res<Config>,
     keyboard: Res<Input<KeyCode>>,
