@@ -1,6 +1,6 @@
 use bevy::math::{Quat, Vec3};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Rotation {
     pub matrix: [[i32; 3]; 3],
     pub quat: Quat,

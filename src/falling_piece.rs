@@ -118,7 +118,7 @@ fn cube_pbr(
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum FallingPieceEvent {
     Spawn,
     Drop,
@@ -151,7 +151,7 @@ pub fn update_falling_piece(
                 &mut grid_query,
                 &mut commands,
             );
-            continue;
+            return;
         }
 
         for (piece_entity, mut piece, mut tfm) in falling_piece_query.iter_mut() {
@@ -186,6 +186,7 @@ pub fn update_falling_piece(
                     &mut grid_query,
                     &mut commands,
                 );
+                return;
             }
         }
     }
