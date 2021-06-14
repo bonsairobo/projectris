@@ -9,9 +9,17 @@ use smooth_bevy_cameras::LookTransformPlugin;
 fn main() -> Result<(), ron::Error> {
     let config = Config::read_file("config.ron")?;
 
+    let window_desc = WindowDescriptor {
+        width: 800.0,
+        height: 600.0,
+        title: "Projectris".to_string(),
+        ..Default::default()
+    };
+
     App::build()
         .add_event::<FallingPieceEvent>()
         .insert_resource(config)
+        .insert_resource(window_desc)
         .insert_resource(Msaa { samples: 4 })
         .add_plugins(DefaultPlugins)
         .add_plugin(LookTransformPlugin)
