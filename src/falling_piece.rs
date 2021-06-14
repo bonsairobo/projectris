@@ -186,6 +186,8 @@ pub fn update_falling_piece(
                     &mut grid_query,
                     &mut commands,
                 );
+                // This return is important. It's possible that there are more events to be processed, but they don't apply to
+                // the piece entity we just despawned. That stale entity still exists in our query.
                 return;
             }
         }
