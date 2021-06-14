@@ -108,10 +108,10 @@ impl Grid {
 
     fn shift_row_down(&mut self, row: i32) {
         let row = self.row_extent(row);
-        let mut piece_types = self.edit_master_channel();
+        let mut master_cells = self.edit_master_channel();
         for p in row.iter_points() {
-            let p_val = piece_types.get(p);
-            *piece_types.get_mut(p - PointN([0, 1])) = p_val;
+            let p_val = master_cells.get(p);
+            *master_cells.get_mut(p - PointN([0, 1])) = p_val;
         }
     }
 
@@ -123,10 +123,10 @@ impl Grid {
 
     fn row_is_full(&self, row: i32) -> bool {
         let row = self.row_extent(row);
-        let piece_types = self.read_master_channel();
+        let master_cells = self.read_master_channel();
 
         for p in row.iter_points() {
-            if let CellValue::Empty = piece_types.get(p) {
+            if let CellValue::Empty = master_cells.get(p) {
                 return false;
             }
         }
@@ -135,12 +135,12 @@ impl Grid {
     }
 
     fn any_cells_colliding(&self, check_cells: &[Point2i]) -> bool {
-        let piece_types = self.read_master_channel();
+        let master_cells = self.read_master_channel();
 
         check_cells
             .iter()
             .cloned()
-            .any(|p| piece_types.get(p).is_piece())
+            .any(|p| master_cells.get(p).is_piece())
     }
 
     fn any_cells_out_of_bounds(&self, check_cells: &[Point2i]) -> bool {
@@ -170,9 +170,9 @@ impl Grid {
 
     pub fn write_piece_with_value(&mut self, piece: &FallingPiece, value: CellValue) {
         let projected_cells = self.project_piece(piece);
-        let mut piece_types = self.edit_visible_channel();
+        let mut visible_cells = self.edit_visible_channel();
         for cell_p in projected_cells.iter().cloned() {
-            *piece_types.get_mut(cell_p) = value;
+            *visible_cells.get_mut(cell_p) = value;
         }
     }
 
