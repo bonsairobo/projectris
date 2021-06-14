@@ -286,7 +286,7 @@ fn try_rotate_piece(
     new_piece.rotate(rotation.matrix);
 
     if move_accepted_in_all_active_grids(piece, &new_piece, false, grid_query) {
-        tfm.rotate(rotation.quat);
+        tfm.rotation = rotation.quat * tfm.rotation;
         *piece = new_piece;
     }
 }
