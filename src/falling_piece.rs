@@ -2,15 +2,13 @@ use crate::{
     CellValue, Config, GrabBag, Grid, PieceCollisionResult, PieceMaterials, PieceType, Rotation,
     SceneAssets,
 };
-
 use bevy::prelude::*;
-use building_blocks::core::prelude::*;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Component, Copy, Debug)]
 pub struct FallingPiece {
     piece_type: PieceType,
-    center_position: Point3i,
-    offsets: [Point3i; 3],
+    center_position: IVec3,
+    offsets: [IVec3; 3],
 }
 
 impl FallingPiece {
@@ -18,25 +16,25 @@ impl FallingPiece {
         self.piece_type
     }
 
-    pub fn translate(&mut self, offset: Point3i) {
+    pub fn translate(&mut self, offset: IVec3) {
         self.center_position += offset;
     }
 
     pub fn translate_n_rows(&mut self, n: i32) {
-        self.translate(PointN([0, n, 0]));
+        self.translate(IVec3::new(0, n, 0));
     }
 
     pub fn rotate(&mut self, matrix: [[i32; 3]; 3]) {
-        let x_map = PointN(matrix[0]);
-        let y_map = PointN(matrix[1]);
-        let z_map = PointN(matrix[2]);
+        let x_map = IVec3::from(matrix[0]);
+        let y_map = IVec3::from(matrix[1]);
+        let z_map = IVec3::from(matrix[2]);
 
         for p in self.offsets.iter_mut() {
-            *p = PointN([x_map.dot(*p), y_map.dot(*p), z_map.dot(*p)]);
+            *p = IVec3::new(x_map.dot(*p), y_map.dot(*p), z_map.dot(*p));
         }
     }
 
-    pub fn cell_positions(&self) -> [Point3i; 4] {
+    pub fn cell_positions(&self) -> [IVec3; 4] {
         let mut positions = [self.center_position; 4];
         for i in 0..3 {
             positions[i + 1] = self.center_position + self.offsets[i];
@@ -47,21 +45,22 @@ impl FallingPiece {
 }
 
 pub fn spawn_falling_piece(
-    grid_size: Point2i,
+    grid_shape: [usize; 2],
     grab_bag: &mut GrabBag,
     materials: &PieceMaterials,
     cube_mesh: Handle<Mesh>,
     grid_query: &mut Query<&mut Grid>,
     commands: &mut Commands,
 ) -> Entity {
-    let center_position = PointN([grid_size.x() / 2, grid_size.y() - 1, grid_size.x() / 2]);
+    let [shape_x, shape_y] = grid_shape;
+    let center_position = IVec3::new(shape_x as i32 / 2, shape_y as i32 - 1, shape_x as i32 / 2);
     let piece_type = grab_bag.choose_next_piece_type();
     let child_cubes = piece_type.cube_configuration();
 
     let center_cube = cube_pbr(
         piece_type,
         // Offset by 0.5 because the cube is centered at 0.
-        Vec3::from(Point3f::from(center_position)) + Vec3::splat(0.5),
+        center_position.as_vec3() + Vec3::splat(0.5),
         materials,
         cube_mesh.clone(),
     );
@@ -69,9 +68,9 @@ pub fn spawn_falling_piece(
         .iter()
         .map(|cube_offset| {
             commands
-                .spawn_bundle(cube_pbr(
+                .spawn(cube_pbr(
                     piece_type,
-                    Vec3::from(Point3f::from(PointN(*cube_offset))),
+                    IVec3::from(*cube_offset).as_vec3(),
                     materials,
                     cube_mesh.clone(),
                 ))
@@ -82,11 +81,7 @@ pub fn spawn_falling_piece(
     let piece = FallingPiece {
         piece_type,
         center_position,
-        offsets: [
-            PointN(child_cubes[0]),
-            PointN(child_cubes[1]),
-            PointN(child_cubes[2]),
-        ],
+        offsets: child_cubes.map(Into::into),
     };
 
     for mut grid in grid_query.iter_mut() {
@@ -97,10 +92,10 @@ pub fn spawn_falling_piece(
     write_drop_hint_in_active_grids(&piece, grid_query);
 
     commands
-        .spawn()
+        .spawn_empty()
         .insert(piece)
-        .insert_bundle(center_cube)
-        .push_children(&child_cube_entities)
+        .insert(center_cube)
+        .add_children(&child_cube_entities)
         .id()
 }
 
@@ -109,21 +104,20 @@ fn cube_pbr(
     offset: Vec3,
     materials: &PieceMaterials,
     mesh: Handle<Mesh>,
-) -> PbrBundle {
-    PbrBundle {
-        material: materials.get_piece_material(piece_type),
-        mesh,
-        transform: Transform::from_translation(offset),
-        ..Default::default()
-    }
+) -> (MeshMaterial3d<StandardMaterial>, Mesh3d, Transform) {
+    (
+        MeshMaterial3d(materials.get_piece_material(piece_type)),
+        Mesh3d(mesh),
+        Transform::from_translation(offset),
+    )
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Event)]
 pub enum FallingPieceEvent {
     Spawn,
     Drop,
     FastDrop,
-    Translate(Point3i),
+    Translate(IVec3),
     Rotate(Rotation),
 }
 
@@ -136,7 +130,7 @@ pub fn update_falling_piece(
     scene_assets: Res<SceneAssets>,
     config: Res<Config>,
 ) {
-    for event in events.iter() {
+    for event in events.read() {
         // Reset the visible copy of the grid.
         for mut grid in grid_query.iter_mut() {
             grid.copy_master_to_visible();
@@ -292,7 +286,7 @@ fn try_rotate_piece(
 }
 
 fn try_translate_piece(
-    translation: Point3i,
+    translation: IVec3,
     piece: &mut FallingPiece,
     tfm: &mut Transform,
     grid_query: &mut Query<&mut Grid>,
@@ -301,7 +295,7 @@ fn try_translate_piece(
     new_piece.translate(translation);
 
     if move_accepted_in_all_active_grids(piece, &new_piece, false, grid_query) {
-        tfm.translation += Vec3::from(Point3f::from(translation));
+        tfm.translation += translation.as_vec3();
         *piece = new_piece;
     }
 }

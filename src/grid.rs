@@ -1,24 +1,22 @@
 use crate::{Config, FallingPiece, PieceMaterials, PieceType, SceneAssets};
-
 use bevy::prelude::*;
-use building_blocks::{
-    core::prelude::*,
-    storage::{access_traits::*, Array2x1, Array2x3},
-};
-use std::mem::MaybeUninit;
 
+// The `master` copy is never show to the player; it's only used for background
+// calculations that don't want the falling piece getting in the way.
+//
+// The `visible` copy is shown to the player.
+#[derive(Component)]
 pub struct Grid {
-    cells: CellArray,
+    extent: Extent,
+    master: Vec<CellValue>,
+    visible: Vec<CellValue>,
+    entities: Vec<Entity>,
     projection: Box<dyn Projection>,
     active: bool,
 }
 
-pub trait Projection: Fn(Point3i) -> Point2i + 'static + Send + Sync {}
-impl<T> Projection for T where T: Fn(Point3i) -> Point2i + 'static + Send + Sync {}
-
-// Left value is the "master copy," which is never show to the player; it's only used for background calculations that don't
-// want the falling piece getting in the way. Right value is the "visible copy" that is shown to the player.
-pub type CellArray = Array2x3<Entity, CellValue, CellValue>;
+pub trait Projection: Fn(IVec3) -> IVec2 + 'static + Send + Sync {}
+impl<T> Projection for T where T: Fn(IVec3) -> IVec2 + 'static + Send + Sync {}
 
 #[derive(Clone, Copy, Debug)]
 pub enum CellValue {
@@ -33,45 +31,40 @@ impl CellValue {
     }
 }
 
+#[derive(Component)]
 pub struct GridCell;
 
 impl Grid {
     pub fn width(&self) -> i32 {
-        self.cells.extent().shape.x()
+        self.extent.shape.x
     }
 
     pub fn height(&self) -> i32 {
-        self.cells.extent().shape.y()
+        self.extent.shape.y
     }
 
-    fn row_extent(&self, row: i32) -> Extent2i {
-        Extent2i::from_min_and_shape(PointN([0, row]), PointN([self.width(), 1]))
+    fn row_extent(&self, row: i32) -> Extent {
+        Extent::new([0, row].into(), [self.width(), 1].into())
     }
 
-    fn edit_visible_channel(&mut self) -> Array2x1<CellValue, &mut [CellValue]> {
-        self.cells.borrow_channels_mut(|(_, _, v)| v)
+    fn edit_visible(&mut self) -> &mut [CellValue] {
+        &mut self.visible
     }
 
-    fn edit_master_channel(&mut self) -> Array2x1<CellValue, &mut [CellValue]> {
-        self.cells.borrow_channels_mut(|(_, v, _)| v)
+    fn edit_master(&mut self) -> &mut [CellValue] {
+        &mut self.master
     }
 
-    fn read_master_channel(&self) -> Array2x1<CellValue, &[CellValue]> {
-        self.cells.borrow_channels(|(_, v, _)| v)
+    fn read_master_channel(&self) -> &[CellValue] {
+        &self.master
     }
 
     pub fn copy_master_to_visible(&mut self) {
-        let extent = *self.cells.extent();
-        self.cells.for_each_mut(&extent, |_: (), (_, m, v)| {
-            *v = *m;
-        });
+        self.visible.copy_from_slice(&self.master);
     }
 
     fn copy_visible_to_master(&mut self) {
-        let extent = *self.cells.extent();
-        self.cells.for_each_mut(&extent, |_: (), (_, m, v)| {
-            *m = *v;
-        });
+        self.master.copy_from_slice(&self.visible);
     }
 
     fn commit(&mut self) {
@@ -107,47 +100,50 @@ impl Grid {
     }
 
     fn shift_row_down(&mut self, row: i32) {
+        let shape = self.extent.shape;
         let row = self.row_extent(row);
-        let mut master_cells = self.edit_master_channel();
+        let master_cells = self.edit_master();
         for p in row.iter_points() {
-            let p_val = master_cells.get(p);
-            *master_cells.get_mut(p - PointN([0, 1])) = p_val;
+            let p_val = master_cells[index2(shape, p)];
+            master_cells[index2(shape, p - IVec2::new(0, 1))] = p_val;
         }
     }
 
     fn clear_row(&mut self, row: i32) {
+        let shape = self.extent.shape;
         let row = self.row_extent(row);
-        self.edit_master_channel()
-            .fill_extent(&row, CellValue::Empty);
+        let master_cells = self.edit_master();
+        for p in row.iter_points() {
+            master_cells[index2(shape, p)] = CellValue::Empty;
+        }
     }
 
     fn row_is_full(&self, row: i32) -> bool {
+        let shape = self.extent.shape;
         let row = self.row_extent(row);
         let master_cells = self.read_master_channel();
-
         for p in row.iter_points() {
-            if let CellValue::Empty = master_cells.get(p) {
+            if let CellValue::Empty = master_cells[index2(shape, p)] {
                 return false;
             }
         }
-
         true
     }
 
-    fn any_cells_colliding(&self, check_cells: &[Point2i]) -> bool {
+    fn any_cells_colliding(&self, check_cells: &[IVec2]) -> bool {
+        let shape = self.extent.shape;
         let master_cells = self.read_master_channel();
-
         check_cells
             .iter()
             .cloned()
-            .any(|p| master_cells.get(p).is_piece())
+            .any(|p| master_cells[index2(shape, p)].is_piece())
     }
 
-    fn any_cells_out_of_bounds(&self, check_cells: &[Point2i]) -> bool {
+    fn any_cells_out_of_bounds(&self, check_cells: &[IVec2]) -> bool {
         check_cells
             .iter()
             .cloned()
-            .any(|p| !self.cells.extent().contains(p))
+            .any(|p| !self.extent.contains(p))
     }
 
     pub fn check_piece_collision(&self, piece: &FallingPiece) -> PieceCollisionResult {
@@ -169,10 +165,11 @@ impl Grid {
     }
 
     pub fn write_piece_with_value(&mut self, piece: &FallingPiece, value: CellValue) {
+        let shape = self.extent.shape;
         let projected_cells = self.project_piece(piece);
-        let mut visible_cells = self.edit_visible_channel();
+        let visible_cells = self.edit_visible();
         for cell_p in projected_cells.iter().cloned() {
-            *visible_cells.get_mut(cell_p) = value;
+            visible_cells[index2(shape, cell_p)] = value;
         }
     }
 
@@ -189,7 +186,7 @@ impl Grid {
         self.active
     }
 
-    fn project_piece(&self, piece: &FallingPiece) -> Vec<Point2i> {
+    fn project_piece(&self, piece: &FallingPiece) -> Vec<IVec2> {
         piece
             .cell_positions()
             .iter()
@@ -200,15 +197,16 @@ impl Grid {
     fn sync_cell_materials(
         &self,
         materials: &PieceMaterials,
-        cell_material_query: &mut Query<(&GridCell, &mut Handle<StandardMaterial>)>,
+        cell_material_query: &mut Query<(&GridCell, &mut MeshMaterial3d<StandardMaterial>)>,
     ) {
-        self.cells.for_each(
-            self.cells.extent(),
-            |_: (), (cell_entity, _, visible_value)| {
-                let (_, mut material) = cell_material_query.get_mut(cell_entity).unwrap();
-                *material = materials.get_cell_material(visible_value);
-            },
-        );
+        let shape = self.extent.shape;
+        for p in self.extent.iter_points() {
+            let i = index2(shape, p);
+            let cell_entity = self.entities[i];
+            let visible_value = self.visible[i];
+            let (_, mut material) = cell_material_query.get_mut(cell_entity).unwrap();
+            material.0 = materials.get_cell_material(visible_value);
+        }
     }
 }
 
@@ -224,7 +222,7 @@ pub fn create_grids(config: &Config, scene_assets: &SceneAssets, commands: &mut 
     // All cells are locally in the XY plane, so we rotate the parent entity for each grid to fall into the correct plane,
     // either XY or ZY.
 
-    let left_grid_projection = Box::new(|p: Point3i| p.xy());
+    let left_grid_projection = Box::new(|p: IVec3| p.xy());
     let left_grid_transform = Transform {
         translation: config.grid_offset * -Vec3::Z,
         rotation: Quat::from_axis_angle(Vec3::Y, config.grid_tilt_angle),
@@ -239,7 +237,7 @@ pub fn create_grids(config: &Config, scene_assets: &SceneAssets, commands: &mut 
         scene_assets.left_cell_mesh.clone(),
     );
 
-    let right_grid_projection = Box::new(|p: Point3i| p.zy());
+    let right_grid_projection = Box::new(|p: IVec3| p.zy());
     let right_grid_transform = Transform {
         translation: config.grid_offset * -Vec3::X,
         rotation: Quat::from_axis_angle(
@@ -259,81 +257,100 @@ pub fn create_grids(config: &Config, scene_assets: &SceneAssets, commands: &mut 
 }
 
 fn spawn_grid(
-    grid_size: Point2i,
+    grid_size: [usize; 2],
     projection: Box<dyn Projection>,
     grid_transform: Transform,
     commands: &mut Commands,
     piece_materials: &PieceMaterials,
     cell_mesh: Handle<Mesh>,
 ) -> Entity {
-    let cells = spawn_cells(grid_size, commands, piece_materials, cell_mesh);
-    let children = all_cell_entities(&cells);
+    let shape = IVec2::new(grid_size[0] as i32, grid_size[1] as i32);
+    let extent = Extent::new(IVec2::ZERO, shape);
+    let n_cells = extent.size();
+    let master = vec![CellValue::Empty; n_cells];
+    let visible = vec![CellValue::Empty; n_cells];
+    let entities = spawn_cells(extent, commands, piece_materials, cell_mesh);
 
     commands
-        .spawn()
+        .spawn_empty()
+        .add_children(&entities)
         .insert(Grid {
-            cells,
+            extent,
+            entities,
+            master,
+            visible,
             projection,
             active: true,
         })
-        .insert(GlobalTransform::identity())
+        .insert(GlobalTransform::default())
         .insert(grid_transform)
-        .push_children(&children)
         .id()
 }
 
 fn spawn_cells(
-    shape: Point2i,
+    extent: Extent,
     commands: &mut Commands,
     materials: &PieceMaterials,
     cell_mesh: Handle<Mesh>,
-) -> CellArray {
-    let grid_extent = Extent2i::from_min_and_shape(Point2i::ZERO, shape);
-    let mut cells: Array2x3<MaybeUninit<Entity>, MaybeUninit<CellValue>, MaybeUninit<CellValue>> =
-        unsafe { Array2x3::maybe_uninit(grid_extent) };
+) -> Vec<Entity> {
+    let n_cells = extent.size();
+    let mut entities = vec![Entity::PLACEHOLDER; n_cells];
 
-    cells.for_each_mut(
-        &grid_extent,
-        |p: Point2i, (uninit_entity, uninit_master_value, uninit_visible_value)| {
-            let entity = commands
-                .spawn()
-                .insert(GridCell)
-                .insert_bundle(PbrBundle {
-                    mesh: cell_mesh.clone(),
-                    material: materials.empty_cell_material(),
-                    // We have to offset by 0.5 because the cell meshes are centered at (0, 0).
-                    transform: Transform::from_xyz(p.x() as f32 + 0.5, p.y() as f32 + 0.5, 0.0),
-                    ..Default::default()
-                })
-                .id();
-            unsafe {
-                uninit_entity.as_mut_ptr().write(entity);
-                uninit_master_value.as_mut_ptr().write(CellValue::Empty);
-                uninit_visible_value.as_mut_ptr().write(CellValue::Empty);
-            }
-        },
-    );
-
-    unsafe { cells.assume_init() }
-}
-
-fn all_cell_entities(cells: &CellArray) -> Vec<Entity> {
-    let mut entities = Vec::new();
-    cells
-        .borrow_channels(|(e, _, _)| e)
-        .for_each(cells.extent(), |_: (), entity| {
-            entities.push(entity);
-        });
-
+    for p in extent.iter_points() {
+        let i = index2(extent.shape, p);
+        let entity = commands
+            .spawn(GridCell)
+            .insert(Mesh3d(cell_mesh.clone()))
+            .insert(MeshMaterial3d(materials.empty_cell_material()))
+            // We have to offset by 0.5 because the cell meshes are centered at (0, 0).
+            .insert(Transform::from_xyz(p.x as f32 + 0.5, p.y as f32 + 0.5, 0.0))
+            .id();
+        entities[i] = entity;
+    }
     entities
 }
 
 pub fn synchronize_grid_materials(
     grids_query: Query<&Grid>,
     assets: Res<SceneAssets>,
-    mut cell_material_query: Query<(&GridCell, &mut Handle<StandardMaterial>)>,
+    mut cell_material_query: Query<(&GridCell, &mut MeshMaterial3d<StandardMaterial>)>,
 ) {
     for grid in grids_query.iter() {
         grid.sync_cell_materials(&assets.piece_materials, &mut cell_material_query);
     }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+struct Extent {
+    min: IVec2,
+    shape: IVec2,
+}
+
+impl Extent {
+    fn new(min: IVec2, shape: IVec2) -> Self {
+        Self { min, shape }
+    }
+
+    fn size(&self) -> usize {
+        (self.shape.x * self.shape.y) as usize
+    }
+
+    fn max(&self) -> IVec2 {
+        (self.min + self.shape) - IVec2::ONE
+    }
+
+    fn contains(&self, p: IVec2) -> bool {
+        let max = self.max();
+        self.min.x < p.x && p.x <= max.x && self.min.y < p.y && p.y <= max.y
+    }
+
+    fn iter_points(&self) -> impl Iterator<Item = IVec2> {
+        let &Self { min, shape } = self;
+        let sup = min + shape;
+        (min.y..sup.y).flat_map(move |y| (min.x..sup.x).map(move |x| IVec2::new(x, y)))
+    }
+}
+
+fn index2(shape: IVec2, p: IVec2) -> usize {
+    (shape.x * p.y + p.x) as usize
 }

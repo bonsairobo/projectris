@@ -1,7 +1,5 @@
 use crate::{create_grids, Config, DropTimer, FallingPieceEvent, GrabBag, SceneAssets};
-
 use bevy::prelude::*;
-use smooth_bevy_cameras::LookTransform;
 
 pub fn create_game(
     config: Res<Config>,
@@ -21,10 +19,11 @@ pub fn create_game(
 
 fn create_camera(config: &Config, commands: &mut Commands) -> Entity {
     commands
-        .spawn_bundle(PerspectiveCameraBundle::default())
-        .insert(LookTransform {
-            eye: config.camera_position,
-            target: config.camera_target,
-        })
+        .spawn(Camera3d::default())
+        .insert(
+            Transform::default()
+                .with_translation(config.camera_position)
+                .looking_at(config.camera_target, Vec3::Y),
+        )
         .id()
 }

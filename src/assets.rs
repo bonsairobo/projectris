@@ -1,7 +1,7 @@
 use crate::{CellValue, PieceType};
+use bevy::{color::palettes::css, prelude::*};
 
-use bevy::prelude::*;
-
+#[derive(Resource)]
 pub struct SceneAssets {
     pub left_cell_mesh: Handle<Mesh>,
     pub right_cell_mesh: Handle<Mesh>,
@@ -15,15 +15,19 @@ pub fn create_scene_assets(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let left_cell_mesh = meshes.add(Mesh::from(shape::Quad {
-        size: Vec2::ONE,
-        flip: true,
+    let left_cell_mesh = meshes.add(
+        Mesh::from(Rectangle {
+            half_size: 0.5 * Vec2::ONE,
+        })
+        .with_inverted_winding()
+        .unwrap(),
+    );
+    let right_cell_mesh = meshes.add(Mesh::from(Rectangle {
+        half_size: 0.5 * Vec2::ONE,
     }));
-    let right_cell_mesh = meshes.add(Mesh::from(shape::Quad {
-        size: Vec2::ONE,
-        flip: false,
+    let cube_mesh = meshes.add(Mesh::from(Cuboid {
+        half_size: 0.5 * Vec3::ONE,
     }));
-    let cube_mesh = meshes.add(Mesh::from(shape::Cube { size: 1.0 }));
 
     let piece_materials = PieceMaterials::new(&server, &mut materials);
 
@@ -44,19 +48,20 @@ pub struct PieceMaterials {
 
 impl PieceMaterials {
     pub fn new(server: &AssetServer, materials: &mut Assets<StandardMaterial>) -> Self {
-        let empty_cell_material = materials.add(cell_material(Color::GRAY));
-        let drop_hint_material = materials.add(cell_material(Color::DARK_GRAY));
+        let empty_cell_material = materials.add(cell_material(css::GRAY.into()));
+        let drop_hint_material = materials.add(cell_material(css::DARK_GRAY.into()));
 
         let piece_colors = [
-            Color::RED,
-            Color::GREEN,
-            Color::BLUE,
-            Color::YELLOW,
-            Color::CYAN,
-            Color::PINK,
-            Color::ORANGE,
-            Color::PURPLE,
-        ];
+            css::RED,
+            css::GREEN,
+            css::BLUE,
+            css::YELLOW,
+            css::LIGHT_CYAN,
+            css::PINK,
+            css::ORANGE,
+            css::PURPLE,
+        ]
+        .map(Color::from);
 
         let cell_materials = piece_colors
             .iter()
@@ -64,7 +69,7 @@ impl PieceMaterials {
             .map(|c| materials.add(cell_material(c)))
             .collect();
 
-        let bordered_texture: Handle<Texture> = server.load("BorderedTile.png");
+        let bordered_texture: Handle<Image> = server.load("BorderedTile.png");
         let piece_materials = piece_colors
             .iter()
             .cloned()
@@ -107,10 +112,9 @@ fn cell_material(color: Color) -> StandardMaterial {
     m
 }
 
-fn piece_material(color: Color, texture: Handle<Texture>) -> StandardMaterial {
+fn piece_material(color: Color, texture: Handle<Image>) -> StandardMaterial {
     let mut m = StandardMaterial::from(texture);
     m.unlit = true;
     m.base_color = color;
-
     m
 }

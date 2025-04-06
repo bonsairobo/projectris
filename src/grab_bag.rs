@@ -1,7 +1,8 @@
 use crate::{PieceType, ALL_PIECE_TYPES};
-
+use bevy::prelude::Resource;
 use rand::{prelude::SliceRandom, thread_rng};
 
+#[derive(Resource)]
 pub struct GrabBag {
     repeats_per_bag: usize,
     bag: Vec<PieceType>,

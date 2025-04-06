@@ -1,10 +1,11 @@
-use bevy::{math::Vec3, prelude::KeyCode};
-use building_blocks::core::prelude::*;
-use serde::{Deserialize, Serialize};
+use bevy::{
+    math::Vec3,
+    prelude::{KeyCode, Resource},
+};
 
-#[derive(Deserialize, Serialize)]
+#[derive(Resource, serde::Deserialize, serde::Serialize)]
 pub struct Config {
-    pub grid_size: Point2i,
+    pub grid_size: [usize; 2],
     pub grid_offset: f32,
     pub grid_tilt_angle: f32,
     pub camera_position: Vec3,
